@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:latest
+    container_name: meumt_mongodb
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - meumt_network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  redis:
+    image: redis:alpine
+    container_name: meumt_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - meumt_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: meumt_backend
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - MONGO_URI=mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@mongodb:27017/meumt?authSource=admin
+      - REDIS_URL=redis://redis:6379
+      - PORT=5002
+    ports:
+      - "5002:5002"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/usr/src/app
+      - /usr/src/app/node_modules
+    networks:
+      - meumt_network
+    healthcheck:
+      test: ["CMD", "node", "healthcheck.js"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: meumt_frontend
+    restart: always
+    ports:
+      - "3003:3003"
+    environment:
+      - VITE_API_URL=http://backend:5002
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/usr/src/app
+      - /usr/src/app/node_modules
+    networks:
+      - meumt_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  meumt_network:
+    driver: bridge
+
+volumes:
+  mongodb_data:
+  redis_data: 
